@@ -10,8 +10,8 @@ PALAVRAS_CHAVE = [
 
 FONTES = {
     "Globo": "https://g1.globo.com/rss/g1/",
-    "Valor": "https://valor.globo.com/rss/",
-    "Estadão": "https://www.estadao.com.br/rss/"
+    "Valor": "https://valor.globo.com/rss/valor",
+    "Estadão": "https://www.estadao.com.br/arc/outboundfeeds/feeds/rss/sections/geral/"
 }
 
 
