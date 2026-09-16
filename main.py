@@ -1,12 +1,12 @@
 import requests
 import feedparser
 import re
+import os
+import smtplib
 from datetime import datetime
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
-
-# ============================================================
-# CONFIGURAÇÕES
-# ============================================================
 
 FONTES = {
     "Globo": "https://g1.globo.com/rss/g1/",
@@ -20,27 +20,43 @@ EMPRESAS = {
         "petrobras",
         "petrobrás"
     ],
-
     "Axia": [
         "axia",
         "axia energia"
     ],
-
     "Vale": [
-        "vale s.a",
-        "vale s/a",
-        "vale sa",
-        "companhia vale",
-        "companhia vale do rio doce",
-        "vale mineração",
-        "vale mineracao"
+        "vale"
     ]
 }
 
 
-# ============================================================
-# BUSCA DAS NOTÍCIAS
-# ============================================================
+def limpar_texto(texto):
+    texto = texto.lower()
+    texto = re.sub(r"<[^>]+>", " ", texto)
+    texto = re.sub(r"\s+", " ", texto)
+    return texto.strip()
+
+
+def identificar_empresas(texto):
+    encontradas = []
+
+    texto = limpar_texto(texto)
+
+    for empresa, palavras in EMPRESAS.items():
+
+        for palavra in palavras:
+
+            palavra = limpar_texto(palavra)
+
+            padrao = rf"\b{re.escape(palavra)}\b"
+
+            if re.search(padrao, texto):
+
+                encontradas.append(empresa)
+                break
+
+    return encontradas
+
 
 def buscar_noticias(nome_fonte, url):
 
@@ -64,19 +80,26 @@ def buscar_noticias(nome_fonte, url):
 
         for noticia in feed.entries:
 
-            titulo = noticia.get("title", "").strip()
+            titulo = noticia.get(
+                "title",
+                ""
+            ).strip()
 
             descricao = (
                 noticia.get("summary", "")
                 or noticia.get("description", "")
             ).strip()
 
-            link = noticia.get("link", "").strip()
+            link = noticia.get(
+                "link",
+                ""
+            ).strip()
 
-            # Junta título + descrição
-            texto = f"{titulo} {descricao}".lower()
+            texto = f"{titulo} {descricao}"
 
-            empresas_encontradas = identificar_empresas(texto)
+            empresas_encontradas = identificar_empresas(
+                texto
+            )
 
             if empresas_encontradas:
 
@@ -88,118 +111,54 @@ def buscar_noticias(nome_fonte, url):
                     "empresas": empresas_encontradas
                 })
 
+        print(
+            f"✅ {nome_fonte}: "
+            f"{len(noticias)} notícia(s) encontrada(s)"
+        )
+
         return noticias
 
     except Exception as erro:
 
-        print(f"❌ Erro em {nome_fonte}: {erro}")
+        print(
+            f"❌ Erro em {nome_fonte}: {erro}"
+        )
 
         return []
 
 
-# ============================================================
-# IDENTIFICAÇÃO DAS EMPRESAS
-# ============================================================
+def criar_relatorio(noticias):
 
-def identificar_empresas(texto):
+    agora = datetime.now().strftime(
+        "%d/%m/%Y %H:%M"
+    )
 
-    encontradas = []
+    html = f"""
+    <html>
 
-    texto = limpar_texto(texto)
+    <body style="
+        font-family: Arial, sans-serif;
+        background-color: #f5f5f5;
+        padding: 20px;
+    ">
 
-    for empresa, palavras in EMPRESAS.items():
+        <div style="
+            max-width: 800px;
+            margin: auto;
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+        ">
 
-        for palavra in palavras:
+            <h1>📰 Monitor de Notícias</h1>
 
-            palavra = limpar_texto(palavra)
+            <p>
+                <strong>Data da consulta:</strong>
+                {agora}
+            </p>
 
-            # Procura a expressão como palavra separada
-            padrao = rf"\b{re.escape(palavra)}\b"
-
-            if re.search(padrao, texto):
-
-                # Tratamento especial para "Vale"
-                if empresa == "Vale":
-
-                    if vale_realmente_e_empresa(texto):
-                        encontradas.append(empresa)
-                        break
-
-                else:
-
-                    encontradas.append(empresa)
-                    break
-
-    return encontradas
-
-
-# ============================================================
-# LIMPEZA DO TEXTO
-# ============================================================
-
-def limpar_texto(texto):
-
-    texto = texto.lower()
-
-    # Remove HTML
-    texto = re.sub(r"<[^>]+>", " ", texto)
-
-    # Normaliza espaços
-    texto = re.sub(r"\s+", " ", texto)
-
-    return texto.strip()
-
-
-# ============================================================
-# FILTRO ESPECIAL DA VALE
-# ============================================================
-
-def vale_realmente_e_empresa(texto):
-
-    termos_excluir = [
-
-        "vale do aço",
-        "vale do aco",
-        "vale-pedágio",
-        "vale pedágio",
-        "vale-pedagio",
-        "vale pedagio",
-        "vale transporte",
-        "vale-transporte",
-        "vale alimentação",
-        "vale alimentacao",
-        "vale-refeição",
-        "vale-refeicao",
-        "vale presente",
-        "vale-presente",
-        "vale combustível",
-        "vale combustivel"
-    ]
-
-    for termo in termos_excluir:
-
-        if termo in texto:
-            return False
-
-    return True
-
-
-# ============================================================
-# EXIBIÇÃO DOS RESULTADOS
-# ============================================================
-
-def mostrar_resultados(noticias):
-
-    print("\n" + "=" * 70)
-    print("RESULTADOS")
-    print("=" * 70)
-
-    if not noticias:
-
-        print("\nNenhuma notícia encontrada.")
-
-        return
-
+            <hr>
+    """
 
     empresas = [
         "Petrobras",
@@ -207,8 +166,11 @@ def mostrar_resultados(noticias):
         "Vale"
     ]
 
-
     for empresa in empresas:
+
+        html += f"""
+            <h2>{empresa}</h2>
+        """
 
         noticias_empresa = [
             noticia
@@ -216,58 +178,173 @@ def mostrar_resultados(noticias):
             if empresa in noticia["empresas"]
         ]
 
-
-        print("\n")
-        print("=" * 70)
-        print(f" {empresa.upper()}")
-        print("=" * 70)
-
-
         if not noticias_empresa:
 
-            print("\nNenhuma notícia encontrada.")
+            html += """
+                <p>Nenhuma notícia encontrada.</p>
+            """
 
             continue
 
-
         for noticia in noticias_empresa:
 
-            print(f"\n📰 {noticia['fonte']}")
-            print(f"   {noticia['titulo']}")
+            descricao = limpar_texto(
+                noticia["descricao"]
+            )
 
-            if noticia["descricao"]:
+            if len(descricao) > 500:
 
-                descricao = limpar_texto(noticia["descricao"])
+                descricao = (
+                    descricao[:500]
+                    + "..."
+                )
 
-                # Limita o tamanho da descrição
-                if len(descricao) > 300:
-                    descricao = descricao[:300] + "..."
+            html += f"""
+                <div style="
+                    margin-bottom: 25px;
+                    padding: 15px;
+                    border: 1px solid #ddd;
+                    border-radius: 8px;
+                ">
 
-                print(f"\n   {descricao}")
+                    <p>
+                        <strong>Fonte:</strong>
+                        {noticia["fonte"]}
+                    </p>
 
-            print(f"\n   🔗 {noticia['link']}")
+                    <h3>
+                        {noticia["titulo"]}
+                    </h3>
+
+                    <p>
+                        {descricao}
+                    </p>
+
+                    <p>
+                        <a href="{noticia["link"]}">
+                            🔗 Ler notícia
+                        </a>
+                    </p>
+
+                </div>
+            """
+
+    html += f"""
+            <hr>
+
+            <p>
+                Total de notícias encontradas:
+                <strong>{len(noticias)}</strong>
+            </p>
+
+            <p style="color: #777;">
+                Relatório enviado automaticamente
+                pelo Monitor de Notícias.
+            </p>
+
+        </div>
+
+    </body>
+
+    </html>
+    """
+
+    return html
 
 
-    print("\n" + "=" * 70)
+def enviar_email(noticias):
 
-    print(
-        f"Total de notícias encontradas: {len(noticias)}"
+    remetente = os.getenv(
+        "EMAIL_REMETENTE"
     )
 
-    print("=" * 70)
+    destinatario = os.getenv(
+        "EMAIL_DESTINO"
+    )
 
+    senha = os.getenv(
+        "EMAIL_SENHA"
+    )
 
-# ============================================================
-# PROGRAMA PRINCIPAL
-# ============================================================
+    if not remetente or not destinatario or not senha:
+
+        print(
+            "❌ Variáveis de e-mail não configuradas."
+        )
+
+        return
+
+    relatorio = criar_relatorio(
+        noticias
+    )
+
+    mensagem = MIMEMultipart(
+        "alternative"
+    )
+
+    mensagem["Subject"] = (
+        "📰 Monitor de Notícias - "
+        f"{datetime.now():%d/%m/%Y}"
+    )
+
+    mensagem["From"] = remetente
+
+    mensagem["To"] = destinatario
+
+    mensagem.attach(
+        MIMEText(
+            relatorio,
+            "html",
+            "utf-8"
+        )
+    )
+
+    try:
+
+        print(
+            "\n📧 Enviando relatório por e-mail..."
+        )
+
+        with smtplib.SMTP_SSL(
+            "smtp.gmail.com",
+            465
+        ) as servidor:
+
+            servidor.login(
+                remetente,
+                senha
+            )
+
+            servidor.sendmail(
+                remetente,
+                destinatario,
+                mensagem.as_string()
+            )
+
+        print(
+            "✅ E-mail enviado com sucesso!"
+        )
+
+    except Exception as erro:
+
+        print(
+            f"❌ Erro ao enviar e-mail: {erro}"
+        )
+
 
 def main():
 
     print("=" * 70)
-    print("             MONITOR DE NOTÍCIAS")
+
+    print(
+        "             MONITOR DE NOTÍCIAS"
+    )
+
     print("=" * 70)
 
-    print("\nPalavras monitoradas:")
+    print(
+        "\nPalavras monitoradas:"
+    )
 
     print("• Petrobras")
     print("• Axia")
@@ -278,11 +355,7 @@ def main():
         f"{datetime.now():%d/%m/%Y %H:%M:%S}"
     )
 
-
     todas_noticias = []
-
-
-    # Consulta todas as fontes
 
     for nome, url in FONTES.items():
 
@@ -291,15 +364,13 @@ def main():
             url
         )
 
-        todas_noticias.extend(noticias)
-
-
-    # Remove notícias duplicadas
+        todas_noticias.extend(
+            noticias
+        )
 
     noticias_unicas = []
 
     links_processados = set()
-
 
     for noticia in todas_noticias:
 
@@ -307,20 +378,27 @@ def main():
 
         if link not in links_processados:
 
-            links_processados.add(link)
+            links_processados.add(
+                link
+            )
 
-            noticias_unicas.append(noticia)
+            noticias_unicas.append(
+                noticia
+            )
 
+    print("\n" + "=" * 70)
 
-    # Mostra resultados
+    print(
+        f"TOTAL: "
+        f"{len(noticias_unicas)} notícia(s)"
+    )
 
-    mostrar_resultados(noticias_unicas)
+    print("=" * 70)
 
+    enviar_email(
+        noticias_unicas
+    )
 
-# ============================================================
-# INÍCIO
-# ============================================================
 
 if __name__ == "__main__":
-
     main()
